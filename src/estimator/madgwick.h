@@ -33,6 +33,9 @@ private:
     float pitch;
     float yaw;
     char anglesComputed;
+
+    float dt_max = 0.1f;
+
     void computeAngles();
 
 //-------------------------------------------------------------------------------------------

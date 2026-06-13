@@ -226,6 +226,12 @@ void Madgwick::updateIMU(float gx, float gy, float gz, float ax, float ay, float
 
 void Madgwick::updateIMUdt(float gx, float gy, float gz, float ax, float ay, float az, float dt)
 {
+
+	if (dt <= 0.0f || dt > dt_max)
+	{
+		return;
+	}
+
     invSampleFreq = dt;
 
     updateIMU(gx, gy, gz, ax, ay, az);
