@@ -42,6 +42,8 @@ private:
 
     bool firstRun;
 
+    float dt_max = 0.1f;
+
     void lpf_step(float& current, float target, float alpha);
     float wrap180_deg(float angle);
 };

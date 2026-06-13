@@ -63,8 +63,9 @@ float PIDController::update(float target,
                             bool is_yaw,
                             bool derivativeOnMeasurement)
 {
-    if (dt <= 0.000001f) 
+    if (dt <= 0.0f || dt > dt_max) 
     {
+        reset();
         return 0.0f;
     }
 
