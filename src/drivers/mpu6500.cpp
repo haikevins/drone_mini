@@ -5,6 +5,7 @@
 
 #include "drivers/mpu6500.h"
 #include <math.h>
+#include <float.h>
 
 float MPU6500::accel_raw_to_g(int16_t raw_value)
 {
@@ -34,6 +35,84 @@ float MPU6500::clamp_alpha(float alpha)
 float MPU6500::lpf_step(float current, float target, float alpha)
 {
     return current + (alpha * (target - current));
+}
+
+
+float MPU6500::safe_divisor(float value)
+{
+    if (fabsf(value) < 1e-6f)
+    {
+        return 1.0f;
+    }
+
+    return value;
+}
+
+float MPU6500::safe_accel_scale(float max_value, float min_value)
+{
+    const float scale = (max_value - min_value) / (2.0f * one_g);
+    return safe_divisor(scale);
+}
+
+void MPU6500::wait_for_stream_input(Stream * p_stream)
+{
+    if (p_stream == nullptr)
+    {
+        delay(2000);
+        return;
+    }
+
+    while (p_stream->available() > 0)
+    {
+        (void)p_stream->read();
+    }
+
+    while (p_stream->available() == 0)
+    {
+        delay(10);
+    }
+
+    while (p_stream->available() > 0)
+    {
+        (void)p_stream->read();
+    }
+
+    delay(300);
+}
+
+bool MPU6500::read_accel_average_g(uint16_t samples, float & avg_x, float & avg_y, float & avg_z)
+{
+    if ((samples == 0u) || (p_spi_bus == nullptr))
+    {
+        return false;
+    }
+
+    double sum_x = 0.0;
+    double sum_y = 0.0;
+    double sum_z = 0.0;
+
+    for (uint16_t sample_index = 0u; sample_index < samples; ++sample_index)
+    {
+        if (wait_for_data(10000u) == false)
+        {
+            return false;
+        }
+
+        if (read_sensor() == false)
+        {
+            return false;
+        }
+
+        sum_x += static_cast<double>(accel_raw_to_g(raw.ax));
+        sum_y += static_cast<double>(accel_raw_to_g(raw.ay));
+        sum_z += static_cast<double>(accel_raw_to_g(raw.az));
+    }
+
+    avg_x = static_cast<float>(sum_x / static_cast<double>(samples));
+    avg_y = static_cast<float>(sum_y / static_cast<double>(samples));
+    avg_z = static_cast<float>(sum_z / static_cast<double>(samples));
+
+    return true;
 }
 
 bool MPU6500::begin(SPIBus * p_spi_bus_ref, uint8_t chip_select_pin_ref, int sck_pin, int miso_pin, int mosi_pin)
@@ -80,7 +159,6 @@ bool MPU6500::begin(SPIBus * p_spi_bus_ref, uint8_t chip_select_pin_ref, int sck
 
     /*
      * Enable data-ready status bit.
-     * You do NOT need to connect the physical INT pin for polling INT_STATUS.
      */
     p_spi_bus->write_register(chip_select_pin, int_enable_reg, 0x01u);
 
@@ -93,8 +171,6 @@ bool MPU6500::begin(SPIBus * p_spi_bus_ref, uint8_t chip_select_pin_ref, int sck
     timing.now_us = timing.last_us;
     timing.dt = 0.0f;
     timing.imu_dt = 0.0f;
-
-    filter_initialized = false;
 
     return true;
 }
@@ -139,10 +215,6 @@ bool MPU6500::wait_for_data(uint32_t timeout_us)
 
 bool MPU6500::update()
 {
-    /*
-     * Similar to Flix's waitForData():
-     * only read when a new IMU sample is available.
-     */
     if (wait_for_data() == false)
     {
         return false;
@@ -161,20 +233,7 @@ bool MPU6500::update()
     scale_sensor();
     apply_bias_and_scale();
     rotate_to_body_frame();
-
-    /*
-     * Avoid starting LPF from zero.
-     * First filtered value should equal first corrected sample.
-     */
-    if (filter_initialized == false)
-    {
-        filtered = scaled;
-        filter_initialized = true;
-    }
-    else
-    {
-        low_pass_filter();
-    }
+    low_pass_filter();
 
     return true;
 }
@@ -245,8 +304,6 @@ void MPU6500::set_body_rotation(float roll_rad, float pitch_rad, float yaw_rad)
     imu_rotation_roll = roll_rad;
     imu_rotation_pitch = pitch_rad;
     imu_rotation_yaw = yaw_rad;
-
-    filter_initialized = false;
 }
 
 void MPU6500::rotate_vector_to_body(float & x, float & y, float & z) const
@@ -308,12 +365,6 @@ void MPU6500::low_pass_filter()
     filtered.az = lpf_step(filtered.az, scaled.az, accel_alpha);
 }
 
-void MPU6500::reset_filter()
-{
-    filtered = scaled;
-    filter_initialized = true;
-}
-
 void MPU6500::calibrate_gyro(uint16_t samples)
 {
     if (samples == 0u)
@@ -339,8 +390,6 @@ void MPU6500::calibrate_gyro(uint16_t samples)
     gyro_bias_x = gyro_raw_to_deg_s(static_cast<int16_t>(sum_raw_x / samples));
     gyro_bias_y = gyro_raw_to_deg_s(static_cast<int16_t>(sum_raw_y / samples));
     gyro_bias_z = gyro_raw_to_deg_s(static_cast<int16_t>(sum_raw_z / samples));
-
-    filter_initialized = false;
 }
 
 void MPU6500::calibrate_accel(uint16_t samples)
@@ -391,8 +440,183 @@ void MPU6500::calibrate_accel(uint16_t samples)
     accel_scale_x = 1.0f;
     accel_scale_y = 1.0f;
     accel_scale_z = 1.0f;
+}
 
-    filter_initialized = false;
+
+bool MPU6500::calibrate_accel_6_side(uint16_t samples_per_side, Stream * p_stream, bool wait_for_user)
+{
+    if ((samples_per_side == 0u) || (p_spi_bus == nullptr))
+    {
+        return false;
+    }
+
+    const char * side_names[6] =
+    {
+        "+Z up / level",
+        "-Z up / upside down",
+        "+X up / right or left side",
+        "-X up / opposite side",
+        "+Y up / nose or tail up",
+        "-Y up / opposite nose or tail"
+    };
+
+    float min_x = FLT_MAX;
+    float min_y = FLT_MAX;
+    float min_z = FLT_MAX;
+
+    float max_x = -FLT_MAX;
+    float max_y = -FLT_MAX;
+    float max_z = -FLT_MAX;
+
+    /*
+     * Use raw accel converted to g, so the existing calibration values do not
+     * affect this calibration run.
+     */
+    for (uint8_t side = 0u; side < 6u; ++side)
+    {
+        if (p_stream != nullptr)
+        {
+            p_stream->println();
+            p_stream->print(F("Accel 6-side calibration: place IMU/drone on side "));
+            p_stream->print(side + 1u);
+            p_stream->print(F("/6: "));
+            p_stream->println(side_names[side]);
+            p_stream->println(F("Keep it still. Send any key/newline to sample."));
+        }
+
+        if (wait_for_user)
+        {
+            wait_for_stream_input(p_stream);
+        }
+        else
+        {
+            delay(1200);
+        }
+
+        float avg_x = 0.0f;
+        float avg_y = 0.0f;
+        float avg_z = 0.0f;
+
+        if (read_accel_average_g(samples_per_side, avg_x, avg_y, avg_z) == false)
+        {
+            if (p_stream != nullptr)
+            {
+                p_stream->println(F("Accel calibration failed while sampling."));
+            }
+
+            return false;
+        }
+
+        if (avg_x < min_x) { min_x = avg_x; }
+        if (avg_y < min_y) { min_y = avg_y; }
+        if (avg_z < min_z) { min_z = avg_z; }
+
+        if (avg_x > max_x) { max_x = avg_x; }
+        if (avg_y > max_y) { max_y = avg_y; }
+        if (avg_z > max_z) { max_z = avg_z; }
+
+        if (p_stream != nullptr)
+        {
+            p_stream->print(F("Average accel [g]: x="));
+            p_stream->print(avg_x, 6);
+            p_stream->print(F(" y="));
+            p_stream->print(avg_y, 6);
+            p_stream->print(F(" z="));
+            p_stream->println(avg_z, 6);
+        }
+    }
+
+    const float span_x = max_x - min_x;
+    const float span_y = max_y - min_y;
+    const float span_z = max_z - min_z;
+
+    /*
+     * A valid 6-side run should produce about 2g span on every axis.
+     * Keep the threshold loose so small placement errors do not fail the run,
+     * but still catch missing/repeated faces.
+     */
+    if ((span_x < 1.2f) || (span_y < 1.2f) || (span_z < 1.2f))
+    {
+        if (p_stream != nullptr)
+        {
+            p_stream->println(F("Accel calibration failed: each axis must see both +1g and -1g."));
+            p_stream->print(F("Spans [g]: x="));
+            p_stream->print(span_x, 6);
+            p_stream->print(F(" y="));
+            p_stream->print(span_y, 6);
+            p_stream->print(F(" z="));
+            p_stream->println(span_z, 6);
+        }
+
+        return false;
+    }
+
+    accel_bias_x = (max_x + min_x) * 0.5f;
+    accel_bias_y = (max_y + min_y) * 0.5f;
+    accel_bias_z = (max_z + min_z) * 0.5f;
+
+    accel_scale_x = safe_accel_scale(max_x, min_x);
+    accel_scale_y = safe_accel_scale(max_y, min_y);
+    accel_scale_z = safe_accel_scale(max_z, min_z);
+
+    /*
+     * Avoid mixing pre-calibration filtered output with post-calibration data.
+     */
+    filtered.ax = 0.0f;
+    filtered.ay = 0.0f;
+    filtered.az = 0.0f;
+
+    if (p_stream != nullptr)
+    {
+        p_stream->println(F("Accel 6-side calibration complete."));
+        print_accel_calibration(*p_stream);
+    }
+
+    return true;
+}
+
+void MPU6500::set_accel_calibration(float bias_x, float bias_y, float bias_z,
+                                    float scale_x, float scale_y, float scale_z)
+{
+    accel_bias_x = bias_x;
+    accel_bias_y = bias_y;
+    accel_bias_z = bias_z;
+
+    accel_scale_x = safe_divisor(scale_x);
+    accel_scale_y = safe_divisor(scale_y);
+    accel_scale_z = safe_divisor(scale_z);
+}
+
+MPU6500::accel_calibration_t MPU6500::get_accel_calibration() const
+{
+    accel_calibration_t calibration;
+
+    calibration.bias_x = accel_bias_x;
+    calibration.bias_y = accel_bias_y;
+    calibration.bias_z = accel_bias_z;
+
+    calibration.scale_x = accel_scale_x;
+    calibration.scale_y = accel_scale_y;
+    calibration.scale_z = accel_scale_z;
+
+    return calibration;
+}
+
+void MPU6500::print_accel_calibration(Stream & stream) const
+{
+    stream.print(F("accel_bias_x="));
+    stream.println(accel_bias_x, 8);
+    stream.print(F("accel_bias_y="));
+    stream.println(accel_bias_y, 8);
+    stream.print(F("accel_bias_z="));
+    stream.println(accel_bias_z, 8);
+
+    stream.print(F("accel_scale_x="));
+    stream.println(accel_scale_x, 8);
+    stream.print(F("accel_scale_y="));
+    stream.println(accel_scale_y, 8);
+    stream.print(F("accel_scale_z="));
+    stream.println(accel_scale_z, 8);
 }
 
 void MPU6500::set_gyro_lpf(float alpha)

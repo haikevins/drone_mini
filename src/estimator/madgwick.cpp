@@ -19,7 +19,7 @@
 //-------------------------------------------------------------------------------------------
 // Header files
 
-#include "madgwick_filter.h"
+#include "estimator/madgwick.h"
 #include <math.h>
 
 //-------------------------------------------------------------------------------------------
@@ -224,24 +224,9 @@ void Madgwick::updateIMU(float gx, float gy, float gz, float ax, float ay, float
 	anglesComputed = 0;
 }
 
-void Madgwick::updateIMUdt(float gx, float gy, float gz, float ax, float ay, float az, float dt_s)
+void Madgwick::updateIMUdt(float gx, float gy, float gz, float ax, float ay, float az, float dt)
 {
-    if (isfinite(dt_s) == false)
-    {
-        return;
-    }
-
-    if (dt_s <= 0.0f)
-    {
-        return;
-    }
-
-    if ((dt_s < 0.0002f) || (dt_s > 0.0200f))
-    {
-        return;
-    }
-
-    invSampleFreq = dt_s;
+    invSampleFreq = dt;
 
     updateIMU(gx, gy, gz, ax, ay, az);
 }

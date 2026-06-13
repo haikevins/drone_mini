@@ -6,118 +6,34 @@
 #include <Arduino.h>
 #include <math.h>
 
-#include "common/math_utils.h"
 #include "common/parameters.h"
 
 #include "drivers/mpu6500.h"
-#include "estimator/madgwick_filter.h"
+#include "estimator/madgwick.h"
 
 static SPIBus g_spi_bus;
 static MPU6500 g_imu;
 static Madgwick g_madgwick;
 
-static uint32_t g_last_print_ms = 0u;
-static uint32_t g_last_rate_ms = 0u;
-static uint32_t g_update_count = 0u;
-static uint32_t g_update_fail_count = 0u;
+float ax = 0.0f;
+float ay = 0.0f;
+float az = 0.0f;
 
-static float g_update_rate_hz = 0.0f;
+float gx = 0.0f;
+float gy = 0.0f;
+float gz = 0.0f;
 
-static float wrap_180(float angle_deg)
-{
-    while (angle_deg >= 180.0f)
-    {
-        angle_deg -= 360.0f;
-    }
+float roll = 0.0f;
+float pitch = 0.0f;
+float yaw = 0.0f;
 
-    while (angle_deg < -180.0f)
-    {
-        angle_deg += 360.0f;
-    }
-
-    return angle_deg;
-}
-
-static void print_header()
-{
-    Serial.println();
-    Serial.println(
-        "dt,rate_hz,fail_count,"
-        "ax,ay,az,gx,gy,gz,acc_norm,gyro_norm,"
-        "roll_deg,pitch_deg,yaw_deg"
-    );
-}
-
-static void print_attitude()
-{
-    const MPU6500::scaled_data_t & d = g_imu.get_filtered();
-    const MPU6500::timing_t & timing = g_imu.get_timing();
-
-    const float acc_norm = sqrtf(
-        d.ax * d.ax +
-        d.ay * d.ay +
-        d.az * d.az
-    );
-
-    const float gyro_norm = sqrtf(
-        d.gx * d.gx +
-        d.gy * d.gy +
-        d.gz * d.gz
-    );
-
-    /*
-     * Madgwick getRoll/getPitch/getYaw return degree.
-     * Note: your Madgwick getYaw() adds +180 internally.
-     * wrap_180() makes yaw easier to read.
-     */
-    const float roll_deg = g_madgwick.getRoll();
-    const float pitch_deg = g_madgwick.getPitch();
-    const float yaw_deg = wrap_180(g_madgwick.getYaw());
-
-    Serial.print(timing.dt, 6);
-    Serial.print(",");
-    Serial.print(g_update_rate_hz, 1);
-    Serial.print(",");
-    Serial.print(g_update_fail_count);
-    Serial.print(",");
-
-    Serial.print(d.ax, 4);
-    Serial.print(",");
-    Serial.print(d.ay, 4);
-    Serial.print(",");
-    Serial.print(d.az, 4);
-    Serial.print(",");
-
-    Serial.print(d.gx, 3);
-    Serial.print(",");
-    Serial.print(d.gy, 3);
-    Serial.print(",");
-    Serial.print(d.gz, 3);
-    Serial.print(",");
-
-    Serial.print(acc_norm, 4);
-    Serial.print(",");
-    Serial.print(gyro_norm, 4);
-    Serial.print(",");
-
-    Serial.print(roll_deg, 2);
-    Serial.print(",");
-    Serial.print(pitch_deg, 2);
-    Serial.print(",");
-    Serial.println(yaw_deg, 2);
-}
+uint16_t serial_period_us = 200u;
+uint32_t last_serial_us = 0;
 
 void setup()
 {
     Serial.begin(115200);
-    delay(2000);
-
-    Serial.println();
-    Serial.println("======================================");
-    Serial.println("MPU6500 + MADGWICK TEST");
-    Serial.println("======================================");
-    Serial.println("Keep the board still and level during calibration.");
-    delay(1000);
+    delay(10000);
 
     const bool b_imu_ready = g_imu.begin(
         &g_spi_bus,
@@ -132,134 +48,94 @@ void setup()
         Serial.println("MPU6500 NOT DETECTED");
         for (;;) {}
     }
+    else
+    {
+        Serial.println("MPU6500 DETECTED");
+    }
 
-    Serial.println("MPU6500 DETECTED");
-
-    /*
-     * IMPORTANT:
-     * Use the same body rotation that passed your pre-Madgwick test.
-     *
-     * If your previous 14/14 test used 0,0,0, keep this:
-     */
     g_imu.set_body_rotation(0.0f, 0.0f, 0.0f);
 
     /*
-     * If your board is mounted like Flix default yaw +90 deg, use this instead:
-     *
      * g_imu.set_body_rotation(0.0f, 0.0f, PI / 2.0f);
      */
 
-    Serial.println("Calibrating gyro...");
-    Serial.println("Do not move the board.");
     g_imu.calibrate_gyro();
-
-    Serial.println("Calibrating accel...");
-    Serial.println("Keep board level. This assumes sensor Z reads about +1g.");
     g_imu.calibrate_accel();
+
+    // Serial.println("\nStart accel 6-side calibration");
+
+    // bool g_imu_calibrate_accel_ready = g_imu.calibrate_accel_6_side(1000, &Serial, true);
+
+    // if (g_imu_calibrate_accel_ready == true)
+    // {
+    //     Serial.println("Accel calibration OK");
+    //     g_imu.print_accel_calibration(Serial);
+    // }
+    // else
+    // {
+    //     Serial.println("Accel calibration FAILED");
+    // }
 
     g_imu.set_gyro_lpf(g_imu_gyro_lpf_alpha);
     g_imu.set_accel_lpf(g_imu_accel_lpf_alpha);
 
-    /*
-     * Your MPU data-ready test shows ~996Hz, so use 1000Hz.
-     * Madgwick code uses invSampleFreq = 1.0f / sampleFrequency.
-     */
-    g_madgwick.begin(1000.0f);
-
-    /*
-     * Warm-up Madgwick while board is still.
-     * This helps roll/pitch settle before printing.
-     */
-    Serial.println("Warming up Madgwick...");
-    const uint32_t warmup_start_ms = millis();
-
-    while ((millis() - warmup_start_ms) < 2000u)
-    {
-        if (g_imu.update())
-        {
-            const MPU6500::scaled_data_t & d = g_imu.get_filtered();
-
-            g_madgwick.updateIMU(
-                d.gx, d.gy, d.gz,   // deg/s
-                d.ax, d.ay, d.az    // g
-            );
-        }
-    }
-
-    Serial.println();
-    Serial.println("Ready.");
-    Serial.println();
-    Serial.println("Expected:");
-    Serial.println("Level still       : roll ~= 0 deg, pitch ~= 0 deg");
-    Serial.println("Roll right/left   : roll changes clearly");
-    Serial.println("Pitch forward/back: pitch changes clearly");
-    Serial.println("Yaw rotation      : yaw changes, but IMU-only yaw may drift over time");
-    Serial.println();
-    Serial.println("Important sign convention from your pre-test:");
-    Serial.println("roll right  -> ay positive");
-    Serial.println("roll left   -> ay negative");
-    Serial.println("pitch down  -> ax negative");
-    Serial.println("pitch up    -> ax positive");
-    Serial.println();
-
-    print_header();
-
-    g_last_print_ms = millis();
-    g_last_rate_ms = millis();
+    g_madgwick.begin(1000.0f); // sample period in Hz
 }
 
 void loop()
 {
-    const bool ok = g_imu.update();
-
-    if (ok == false)
+    if (g_imu.update() == true)
     {
-        g_update_fail_count++;
+        const auto& imu_data = g_imu.get_filtered();
+        
+        const auto& imu_dt = g_imu.get_timing().dt;
 
-        static uint32_t last_fail_print_ms = 0u;
-        const uint32_t now_ms = millis();
+        g_madgwick.updateIMUdt(
+            imu_data.gx,
+            imu_data.gy,
+            imu_data.gz,
+            imu_data.ax,
+            imu_data.ay,
+            imu_data.az,
+            imu_dt
+        );
 
-        if ((now_ms - last_fail_print_ms) >= 1000u)
-        {
-            last_fail_print_ms = now_ms;
-            Serial.println("IMU update timeout/fail.");
-        }
+        ax = imu_data.ax;
+        ay = imu_data.ay;
+        az = imu_data.az;
 
-        return;
+        gx = imu_data.gx;
+        gy = imu_data.gy;
+        gz = imu_data.gz;
+
+        roll = g_madgwick.getRoll();
+        pitch = g_madgwick.getPitch();
+        yaw = g_madgwick.getYaw();
     }
 
-    const MPU6500::scaled_data_t & d = g_imu.get_filtered();
-
-    /*
-     * Your Madgwick implementation expects:
-     * gyro  = deg/s
-     * accel = g
-     */
-    g_madgwick.updateIMU(
-        d.gx, d.gy, d.gz,
-        d.ax, d.ay, d.az
-    );
-
-    g_update_count++;
-
-    const uint32_t now_ms = millis();
-
-    if ((now_ms - g_last_rate_ms) >= 1000u)
+    if (millis() - last_serial_us >= serial_period_us)
     {
-        g_update_rate_hz =
-            static_cast<float>(g_update_count) * 1000.0f /
-            static_cast<float>(now_ms - g_last_rate_ms);
+        last_serial_us += serial_period_us;
 
-        g_update_count = 0u;
-        g_last_rate_ms = now_ms;
-    }
+        Serial.print("ax=");
+        Serial.print(ax, 3);
+        Serial.print(", ay=");
+        Serial.print(ay, 3);
+        Serial.print(", az=");
+        Serial.print(az, 3);
 
-    /*
-     * Print attitude at 20Hz.
-     */
-    if ((now_ms - g_last_print_ms) >= 50u)
-    {
-        g_last_print_ms = now_ms;
-        print_attitude();
+        Serial.print(", gx=");
+        Serial.print(gx, 3);
+        Serial.print(", gy=");
+        Serial.print(gy, 3);
+        Serial.print(", gz=");
+        Serial.print(gz, 3);
+
+        Serial.print(", roll=");
+        Serial.print(roll, 2);
+        Serial.print(", pitch=");
+        Serial.print(pitch, 2);
+        Serial.print(", yaw=");
+        Serial.println(yaw, 2);
     }
 }

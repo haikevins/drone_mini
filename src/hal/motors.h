@@ -22,7 +22,7 @@ class Motor
         static constexpr uint8_t motor_3_pin = 10u; // Back-right motor.
         static constexpr uint8_t motor_4_pin = 3u;  // Back-left motor.
 
-        static constexpr uint16_t motor_freq_hz = 24000u; // 24 kHz.
+        static constexpr uint32_t motor_freq_hz = 78000u; // 78 kHz.
         static constexpr uint8_t motor_resolution_bits = 10u;
 
         static constexpr float motor_pwm_max = 1023.0f;

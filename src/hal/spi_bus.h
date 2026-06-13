@@ -10,7 +10,7 @@
 #include <SPI.h>
 
 class SPIBus
-{
+{            
     public:
         SPIBus (SPIClass & spi_class = SPI);
 

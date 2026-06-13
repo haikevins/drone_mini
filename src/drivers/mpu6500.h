@@ -42,6 +42,17 @@ class MPU6500
             float imu_dt = 0.0f;
         };
 
+        struct accel_calibration_t
+        {
+            float bias_x = 0.0f;
+            float bias_y = 0.0f;
+            float bias_z = 0.0f;
+
+            float scale_x = 1.0f;
+            float scale_y = 1.0f;
+            float scale_z = 1.0f;
+        };
+
         bool begin(SPIBus * p_spi_bus, uint8_t chip_select_pin, int sck_pin, int miso_pin, int mosi_pin);
 
         /*
@@ -56,7 +67,34 @@ class MPU6500
         bool update();
 
         void calibrate_gyro(uint16_t samples = 2000u);
+
+        /*
+         * Simple one-position accelerometer calibration.
+         * Keep this for quick bench tests only.
+         */
         void calibrate_accel(uint16_t samples = 2000u);
+
+        /*
+         * Flix-style 6-side accelerometer calibration.
+         *
+         * Put the IMU/drone on each of its 6 faces. The exact order is not
+         * used in the math; the routine records min/max acceleration on
+         * each sensor axis and computes:
+         *
+         *   bias  = (max + min) / 2
+         *   scale = (max - min) / (2 * 1g)
+         *
+         * Returns false if sampling fails or if a side span is invalid.
+         */
+        bool calibrate_accel_6_side(uint16_t samples_per_side = 1000u,
+                                    Stream * p_stream = &Serial,
+                                    bool wait_for_user = true);
+
+        void set_accel_calibration(float bias_x, float bias_y, float bias_z,
+                                   float scale_x, float scale_y, float scale_z);
+
+        accel_calibration_t get_accel_calibration() const;
+        void print_accel_calibration(Stream & stream) const;
 
         /*
          * Set IMU mounting rotation relative to body frame.
@@ -67,8 +105,6 @@ class MPU6500
          * set_body_rotation(0.0f, 0.0f, PI / 2.0f);   // like Flix default yaw +90 deg
          */
         void set_body_rotation(float roll_rad, float pitch_rad, float yaw_rad);
-
-        void reset_filter();
 
         void set_gyro_lpf(float alpha);
         void set_accel_lpf(float alpha);
@@ -103,8 +139,6 @@ class MPU6500
         float gyro_alpha = 0.8f;
         float accel_alpha = 0.8f;
 
-        bool filter_initialized = false;
-
         float imu_rotation_roll = 0.0f;
         float imu_rotation_pitch = 0.0f;
         float imu_rotation_yaw = 0.0f;
@@ -120,6 +154,12 @@ class MPU6500
 
         bool data_ready();
         bool wait_for_data(uint32_t timeout_us = 3000u);
+
+        bool read_accel_average_g(uint16_t samples, float & avg_x, float & avg_y, float & avg_z);
+
+        static void wait_for_stream_input(Stream * p_stream);
+        static float safe_accel_scale(float max_value, float min_value);
+        static float safe_divisor(float value);
 
         static float accel_raw_to_g(int16_t raw_value);
         static float gyro_raw_to_deg_s(int16_t raw_value);

@@ -3,12 +3,11 @@
  * Motor PWM control implementation.
  */
 
-#include "hal/motor.h"
-#include "common/math_utils.h"
+#include "hal/motors.h"
 
 uint32_t Motor::throttle_to_pwm (float throttle)
 {
-    const float clamped = math_utils::clamp(throttle, motor_speed_min_us, motor_speed_max_us);
+    const float clamped = constrain(throttle, motor_speed_min_us, motor_speed_max_us);
     const float pwm = (clamped - motor_speed_min_us) * motor_pwm_max / (motor_speed_max_us - motor_speed_min_us);
 
     return static_cast<uint32_t>(pwm);
