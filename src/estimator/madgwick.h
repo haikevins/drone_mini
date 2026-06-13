@@ -42,7 +42,7 @@ private:
 // Function declarations
 public:
     Madgwick(void);
-    void begin(float sampleFrequency) { invSampleFreq = 1.0f / sampleFrequency; }
+    void begin(float sampleFrequency) { this->invSampleFreq = 1.0f / sampleFrequency; }
     void update(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my, float mz);
     void updateIMU(float gx, float gy, float gz, float ax, float ay, float az);
     void updateIMUdt(float gx, float gy, float gz, float ax, float ay, float az, float dt);
@@ -59,7 +59,7 @@ public:
     }
     float getYaw() {
         if (!anglesComputed) computeAngles();
-        return yaw * 57.29578f + 180.0f;
+        return yaw * 57.29578f;
     }
     float getRollRadians() {
         if (!anglesComputed) computeAngles();
@@ -72,6 +72,16 @@ public:
     float getYawRadians() {
         if (!anglesComputed) computeAngles();
         return yaw;
+    }
+
+    void setBeta(float beta) { this->beta = beta; }
+    void getBeta(float& beta) const { beta = this->beta; }
+
+    void getQuaternion(float& q0, float& q1, float& q2, float& q3) const {
+        q0 = this->q0;
+        q1 = this->q1;
+        q2 = this->q2;
+        q3 = this->q3;
     }
 };
 #endif

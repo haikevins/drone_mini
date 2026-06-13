@@ -72,7 +72,7 @@ class MPU6500
          * Simple one-position accelerometer calibration.
          * Keep this for quick bench tests only.
          */
-        void calibrate_accel(uint16_t samples = 2000u);
+        void calibrate_accel_once(uint16_t samples = 2000u);
 
         /*
          * Flix-style 6-side accelerometer calibration.

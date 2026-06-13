@@ -1,4 +1,4 @@
-#include "control/pid_balance.h"
+#include "control/pid_controller.h"
 
 PIDController::PIDController(float kp,
                              float ki,

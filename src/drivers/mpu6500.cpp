@@ -392,7 +392,7 @@ void MPU6500::calibrate_gyro(uint16_t samples)
     gyro_bias_z = gyro_raw_to_deg_s(static_cast<int16_t>(sum_raw_z / samples));
 }
 
-void MPU6500::calibrate_accel(uint16_t samples)
+void MPU6500::calibrate_accel_once(uint16_t samples)
 {
     if (samples == 0u)
     {

@@ -11,24 +11,19 @@
 #include "drivers/mpu6500.h"
 #include "estimator/madgwick.h"
 
+#include "control/pid_controller.h"
+
 static SPIBus g_spi_bus;
 static MPU6500 g_imu;
 static Madgwick g_madgwick;
 
-float ax = 0.0f;
-float ay = 0.0f;
-float az = 0.0f;
+static PIDController g_pid_roll_angle(1.0f, 0.1f, 0.01f, 10.0f, 100.0f, 0.5f); // kp, ki, kd, integLimit, outputLimit, dFilterAlpha
+static PIDController g_pid_pitch_angle(1.0f, 0.1f, 0.01f, 10.0f, 100.0f, 0.5f);
+static PIDController g_pid_yaw_angle(1.0f, 0.1f, 0.01f, 10.0f, 100.0f, 0.5f);
 
-float gx = 0.0f;
-float gy = 0.0f;
-float gz = 0.0f;
+static float throttle = 1400.0f;
 
-float roll = 0.0f;
-float pitch = 0.0f;
-float yaw = 0.0f;
-
-uint16_t serial_period_us = 200u;
-uint32_t last_serial_us = 0;
+attitude_data_t attitude_data;
 
 void setup()
 {
@@ -60,7 +55,7 @@ void setup()
      */
 
     g_imu.calibrate_gyro();
-    g_imu.calibrate_accel();
+    g_imu.calibrate_accel_once();
 
     // Serial.println("\nStart accel 6-side calibration");
 
@@ -79,63 +74,61 @@ void setup()
     g_imu.set_gyro_lpf(g_imu_gyro_lpf_alpha);
     g_imu.set_accel_lpf(g_imu_accel_lpf_alpha);
 
-    g_madgwick.begin(1000.0f); // sample period in Hz
+    g_madgwick.begin(g_imu_read_default_hz);
+
+    g_pid_roll_angle.reset();
+    g_pid_pitch_angle.reset();
+    g_pid_yaw_angle.reset();
 }
 
 void loop()
 {
-    if (g_imu.update() == true)
+    if (g_imu.update() == false)
     {
-        const auto& imu_data = g_imu.get_filtered();
-        
-        const auto& imu_dt = g_imu.get_timing().dt;
-
-        g_madgwick.updateIMUdt(
-            imu_data.gx,
-            imu_data.gy,
-            imu_data.gz,
-            imu_data.ax,
-            imu_data.ay,
-            imu_data.az,
-            imu_dt
-        );
-
-        ax = imu_data.ax;
-        ay = imu_data.ay;
-        az = imu_data.az;
-
-        gx = imu_data.gx;
-        gy = imu_data.gy;
-        gz = imu_data.gz;
-
-        roll = g_madgwick.getRoll();
-        pitch = g_madgwick.getPitch();
-        yaw = g_madgwick.getYaw();
+        return;
     }
 
-    if (millis() - last_serial_us >= serial_period_us)
+    const auto& imu_data = g_imu.get_filtered();
+    const auto& imu_dt = g_imu.get_timing().dt;
+
+    g_madgwick.updateIMUdt(
+        imu_data.gx,
+        imu_data.gy,
+        imu_data.gz,
+        imu_data.ax,
+        imu_data.ay,
+        imu_data.az,
+        imu_dt
+    );
+
+    gx = imu_data.gx;
+    gy = imu_data.gy;
+    gz = imu_data.gz;
+
+    attitude_data.roll = g_madgwick.getRoll();
+    attitude_data.pitch = g_madgwick.getPitch();
+    attitude_data.yaw = g_madgwick.getYaw();
+
+    float roll_output = g_pid_roll_angle.update(target_roll_angle, attitude_data.roll, imu_dt, false, true);
+    float pitch_output = g_pid_pitch_angle.update(target_pitch_angle, attitude_data.pitch, imu_dt, false, true);
+    float yaw_output = g_pid_yaw_angle.update(target_yaw_angle, attitude_data.yaw, imu_dt, true, true);
+
+    float motor1_speed = throttle + roll_output - pitch_output + yaw_output; // front left
+    float motor2_speed = throttle - roll_output - pitch_output - yaw_output; // front
+    float motor3_speed = throttle - roll_output + pitch_output + yaw_output; // rear
+    float motor4_speed = throttle + roll_output + pitch_output - yaw_output; // rear
+
+    if (millis() - last_print_time >= g_serial_print_period_ms)
     {
-        last_serial_us += serial_period_us;
+        last_print_time += g_serial_print_period_ms;
 
-        Serial.print("ax=");
-        Serial.print(ax, 3);
-        Serial.print(", ay=");
-        Serial.print(ay, 3);
-        Serial.print(", az=");
-        Serial.print(az, 3);
-
-        Serial.print(", gx=");
-        Serial.print(gx, 3);
-        Serial.print(", gy=");
-        Serial.print(gy, 3);
-        Serial.print(", gz=");
-        Serial.print(gz, 3);
-
-        Serial.print(", roll=");
-        Serial.print(roll, 2);
-        Serial.print(", pitch=");
-        Serial.print(pitch, 2);
-        Serial.print(", yaw=");
-        Serial.println(yaw, 2);
+        Serial.print("motor1: ");
+        Serial.print(motor1_speed);
+        Serial.print(", motor2: ");
+        Serial.print(motor2_speed);
+        Serial.print(", motor3: ");
+        Serial.print(motor3_speed);
+        Serial.print(", motor4: ");
+        Serial.println(motor4_speed);
     }
 }
