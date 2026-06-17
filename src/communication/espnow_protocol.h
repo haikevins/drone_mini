@@ -14,6 +14,10 @@ attitude_data_packet_t;
 typedef struct
 {
     bool arm;
+    bool reset;
+
+    bool throttle_up;
+    bool throttle_down;
 }
 command_data_packet_t;
 

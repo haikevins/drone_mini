@@ -13,6 +13,7 @@ class Motors
     public:
         void setup_motors ();
         void write_motors (float motor_1_us, float motor_2_us, float motor_3_us, float motor_4_us);
+        void write_all_motors (float throttle);
 
     private:
         static uint32_t throttle_to_pwm (float throttle);

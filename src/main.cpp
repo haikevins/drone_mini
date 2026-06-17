@@ -6,8 +6,6 @@
 #include <Arduino.h>
 #include <math.h>
 
-#include "common/parameters.h"
-
 #include "drivers/mpu6500.h"
 #include "estimator/madgwick.h"
 
@@ -30,6 +28,17 @@ static PIDController g_pid_yaw_angle(1.0f, 0.1f, 0.01f, 10.0f, 100.0f, 0.5f);
 
 static ESPNow g_espnow;
 
+static float gx = 0.0f;
+static float gy = 0.0f;
+static float gz = 0.0f;
+
+static attitude_data_packet_t g_attitude_data =
+{
+    0.0f,
+    0.0f,
+    0.0f
+};
+
 static constexpr float target_roll_angle = 0.0f;
 static constexpr float target_pitch_angle = 0.0f;
 static constexpr float target_yaw_angle = 0.0f;
@@ -44,7 +53,16 @@ static constexpr float g_imu_read_default_hz = 1000.0f;
 static constexpr float g_imu_gyro_lpf_alpha = 0.22f;
 static constexpr float g_imu_accel_lpf_alpha = 0.10f;
 
-static constexpr float g_espnow_trans_period_ms = 1000.0f;
+static constexpr uint32_t g_espnow_trans_period_ms = 50u; // 20 Hz
+static uint32_t g_espnow_trans_last_time = 0u;
+
+static constexpr float g_motor_throttle_min = 1000.0f;   // motor stop / disarmed
+static constexpr float g_motor_throttle_idle = 1100.0f;  // armed idle
+static constexpr float g_motor_throttle_max = 1400.0f;
+static constexpr float g_throttle_step_per_second = 80.0f;
+
+static float g_motor_throttle_base = g_motor_throttle_idle;
+static bool g_was_armed = false;
 
 static void setup_imu();
 static void setup_pid();
@@ -66,57 +84,79 @@ void loop()
 {
     const uint32_t now = millis();
 
-    // if (g_imu.update() == false)
-    // {
-    //     return;
-    // }
+    if (g_imu.update() == false)
+    {
+        return;
+    }
 
-    // const auto& imu_data = g_imu.get_filtered();
-    // const auto& imu_dt = g_imu.get_timing().dt;
+    const auto& imu_data = g_imu.get_filtered();
+    const auto& imu_dt = g_imu.get_timing().dt;
 
-    // g_madgwick.updateIMUdt(
-    //     imu_data.gx,
-    //     imu_data.gy,
-    //     imu_data.gz,
-    //     imu_data.ax,
-    //     imu_data.ay,
-    //     imu_data.az,
-    //     imu_dt
-    // );
+    g_madgwick.updateIMUdt(
+        imu_data.gx,
+        imu_data.gy,
+        imu_data.gz,
+        imu_data.ax,
+        imu_data.ay,
+        imu_data.az,
+        imu_dt
+    );
 
-    // gx = imu_data.gx;
-    // gy = imu_data.gy;
-    // gz = imu_data.gz;
+    gx = imu_data.gx;
+    gy = imu_data.gy;
+    gz = imu_data.gz;
 
-    // g_espnow_attitude_data.roll = g_madgwick.getRoll();
-    // g_espnow_attitude_data.pitch = g_madgwick.getPitch();
-    // g_espnow_attitude_data.yaw = g_madgwick.getYaw();
+    g_attitude_data.roll = g_madgwick.getRoll();
+    g_attitude_data.pitch = g_madgwick.getPitch();
+    g_attitude_data.yaw = g_madgwick.getYaw();
 
-    // float roll_output = g_pid_roll_angle.update(target_roll_angle, g_espnow_attitude_data.roll, imu_dt, false, true);
-    // float pitch_output = g_pid_pitch_angle.update(target_pitch_angle, g_espnow_attitude_data.pitch, imu_dt, false, true);
-    // float yaw_output = g_pid_yaw_angle.update(target_yaw_angle, g_espnow_attitude_data.yaw, imu_dt, true, true);
+    float roll_output = g_pid_roll_angle.update(target_roll_angle, g_attitude_data.roll, imu_dt, false, true);
+    float pitch_output = g_pid_pitch_angle.update(target_pitch_angle, g_attitude_data.pitch, imu_dt, false, true);
+    float yaw_output = g_pid_yaw_angle.update(target_yaw_angle, g_attitude_data.yaw, imu_dt, true, true);
 
     // float motor1_speed = g_motor_throttle_base + roll_output - pitch_output + yaw_output; // front left
     // float motor2_speed = g_motor_throttle_base - roll_output - pitch_output - yaw_output; // front
     // float motor3_speed = g_motor_throttle_base - roll_output + pitch_output + yaw_output; // rear
     // float motor4_speed = g_motor_throttle_base + roll_output + pitch_output - yaw_output; // rear
 
+    if (g_espnow.is_armed() == true)
+    {
+        if (g_was_armed == false)
+        {
+            g_motor_throttle_base = g_motor_throttle_idle;
+            g_was_armed = true;
+        }
+
+        if (g_espnow.is_throttle_up() == true)
+        {
+            g_motor_throttle_base += g_throttle_step_per_second * imu_dt;
+        }        
+        else if (g_espnow.is_throttle_down() == true)
+        {
+            g_motor_throttle_base -= g_throttle_step_per_second * imu_dt;
+        }
+
+        g_motor_throttle_base = constrain(
+            g_motor_throttle_base,
+            g_motor_throttle_idle,
+            g_motor_throttle_max
+        );
+
+        g_motors.write_all_motors(g_motor_throttle_base);
+    }
+    else
+    {
+        g_was_armed = false;
+        g_motor_throttle_base = g_motor_throttle_idle;
+
+        g_motors.write_all_motors(g_motor_throttle_min);
+    }
+
     if (now - g_espnow_trans_last_time >= g_espnow_trans_period_ms)
     {
         g_espnow_trans_last_time += g_espnow_trans_period_ms;
-        esp_err_t result = g_espnow.send((uint8_t*)&g_espnow_attitude_data, sizeof(g_espnow_attitude_data));
-    }
-
-    if (g_espnow_command_data.arm == true) 
-    {
-        Serial.println("ARMED");
-        g_motors.write_motors(1100.0f, 1100.0f, 1100.0f, 1100.0f);
-    }
-    else if (g_espnow_command_data.arm == false)
-    {
-        Serial.println("DISARMED");
-        g_motors.write_motors(1000.0f, 1000.0f, 1000.0f, 1000.0f);
-    }
+        g_espnow.send_attitude(g_attitude_data);
+    }    
 }
 
 void setup_imu()
@@ -188,9 +228,6 @@ void setup_espnow()
     {
         Serial.println("ESP-NOW INIT SUCCESS");
     }
-
-    g_espnow.register_send_callback(ESPNow::on_data_sent);
-    g_espnow.register_recv_callback(ESPNow::on_data_recv);
 
     const bool b_peer_registered = g_espnow.register_peer();
     if (b_peer_registered == false)

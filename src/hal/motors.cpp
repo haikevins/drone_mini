@@ -21,6 +21,11 @@ void Motors::write_motors (float motor_1_throttle, float motor_2_throttle, float
     ledcWrite(motor_channel_4, throttle_to_pwm(motor_4_throttle));
 }
 
+void Motors :: write_all_motors (float throttle)
+{
+    write_motors(throttle, throttle, throttle, throttle);
+}
+
 void Motors::setup_motors ()
 {
     ledcSetup(motor_channel_1, motor_freq_hz, motor_resolution_bits);
@@ -33,5 +38,5 @@ void Motors::setup_motors ()
     ledcAttachPin(motor_3_pin, motor_channel_3);
     ledcAttachPin(motor_4_pin, motor_channel_4);
 
-    write_motors(motor_speed_min_us, motor_speed_min_us, motor_speed_min_us, motor_speed_min_us);
+    write_all_motors(motor_speed_min_us);
 }
