@@ -18,6 +18,11 @@ typedef struct
 
     bool throttle_up;
     bool throttle_down;
+
+    bool direction_forward;
+    bool direction_backward;
+    bool direction_left;
+    bool direction_right;   
 }
 command_data_packet_t;
 

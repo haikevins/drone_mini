@@ -20,6 +20,10 @@ class ESPNow
         bool is_reset() const;
         bool is_throttle_up() const;
         bool is_throttle_down() const;
+        bool is_direction_forward() const;
+        bool is_direction_backward() const;
+        bool is_direction_left() const;
+        bool is_direction_right() const;
         void reset_command();
         const command_data_packet_t & get_command_data() const;
 

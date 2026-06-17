@@ -56,12 +56,38 @@ bool ESPNow :: is_throttle_down() const
     return command_data.throttle_down;
 }
 
+bool ESPNow :: is_direction_forward() const
+{
+    return command_data.direction_forward;
+}
+
+bool ESPNow :: is_direction_backward() const
+{
+    return command_data.direction_backward;
+}
+
+bool ESPNow :: is_direction_left() const
+{
+    return command_data.direction_left;
+}
+
+bool ESPNow :: is_direction_right() const
+{
+    return command_data.direction_right;
+}
+
 void ESPNow :: reset_command()
 {
     command_data.arm = false;
     command_data.reset = false;
+
     command_data.throttle_up = false;
     command_data.throttle_down = false;
+
+    command_data.direction_forward = false;
+    command_data.direction_backward = false;
+    command_data.direction_left = false;
+    command_data.direction_right = false;
 }
 
 const command_data_packet_t & ESPNow::get_command_data() const
