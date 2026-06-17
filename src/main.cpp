@@ -22,12 +22,12 @@ static Madgwick g_madgwick;
 
 static Motors g_motors;
 
-static PIDController g_pid_roll_angle(1.0f, 0.1f, 0.01f, 10.0f, 100.0f, 0.5f); // kp, ki, kd, integLimit, outputLimit, dFilterAlpha
-static PIDController g_pid_pitch_angle(1.0f, 0.1f, 0.01f, 10.0f, 100.0f, 0.5f);
+static PIDController g_pid_roll_angle(5.0f, 0.1f, 0.01f, 10.0f, 100.0f, 0.5f); // kp, ki, kd, integLimit, outputLimit, dFilterAlpha
+static PIDController g_pid_pitch_angle(5.0f, 0.1f, 0.01f, 10.0f, 100.0f, 0.5f);
 
-static PIDController g_pid_roll_rate(1.0f, 0.01f, 0.005f, 10.0f, 100.0f, 0.5f);
-static PIDController g_pid_pitch_rate(1.0f, 0.01f, 0.005f, 10.0f, 100.0f, 0.5f);
-static PIDController g_pid_yaw_rate(1.0f, 0.01f, 0.005f, 10.0f, 100.0f, 0.5f);
+static PIDController g_pid_roll_rate(3.0f, 0.01f, 0.005f, 10.0f, 100.0f, 0.5f);
+static PIDController g_pid_pitch_rate(3.0f, 0.01f, 0.005f, 10.0f, 100.0f, 0.5f);
+static PIDController g_pid_yaw_rate(3.0f, 0.01f, 0.005f, 10.0f, 100.0f, 0.5f);
 
 static ESPNow g_espnow;
 
@@ -63,11 +63,11 @@ static constexpr uint32_t g_espnow_trans_period_ms = 50u; // 20 Hz
 static uint32_t g_espnow_trans_last_time = 0u;
 
 static constexpr float g_motor_throttle_base_min = 1000.0f;   // motor stop / disarmed
-static constexpr float g_motor_throttle_base_max = 1400.0f;
+static constexpr float g_motor_throttle_base_max = 1600.0f;
 static constexpr float g_motor_throttle_idle = 1100.0f;  // armed idle
 static constexpr float g_motor_throttle_min = 1000.0f;  // min throttle
 static constexpr float g_motor_throttle_max = 2000.0f;  // max throttle
-static constexpr float g_throttle_step_per_second = 100.0f;
+static constexpr float g_throttle_step_per_second = 200.0f;
 
 static float g_motor_throttle_base = g_motor_throttle_idle;
 static bool g_was_armed = false;
@@ -78,8 +78,8 @@ static void setup_espnow();
 
 void setup()
 {
-    Serial.begin(115200);
-    delay(2000);
+    // Serial.begin(115200);
+    // delay(2000);
 
     setup_imu();
     setup_pid();
@@ -127,11 +127,6 @@ void loop()
     float pitch_output = g_pid_pitch_rate.update(pitch_rate_sp, gy, imu_dt, false, true);
     float yaw_output = g_pid_yaw_rate.update(g_target_yaw_rate, gz, imu_dt, false, true);
 
-    // float motor1_speed = g_motor_throttle_base + roll_output - pitch_output + yaw_output; // front left
-    // float motor2_speed = g_motor_throttle_base - roll_output - pitch_output - yaw_output; // front
-    // float motor3_speed = g_motor_throttle_base - roll_output + pitch_output + yaw_output; // rear
-    // float motor4_speed = g_motor_throttle_base + roll_output + pitch_output - yaw_output; // rear right
-
     if (g_espnow.is_reset() == true) 
     { 
         g_motor_throttle_base = g_motor_throttle_idle; 
@@ -139,7 +134,8 @@ void loop()
         g_espnow.reset_command(); 
         
         delay(100); 
-        esp_restart(); 
+        esp_restart();
+         
         return; 
     }    
 
@@ -162,15 +158,17 @@ void loop()
 
         g_motor_throttle_base = constrain(g_motor_throttle_base, g_motor_throttle_idle, g_motor_throttle_base_max);
 
-        /*
-            g_motors.write_motors(
-                motor1_speed,
-                motor2_speed,
-                motor3_speed,
-                motor4_speed
-            );
-        */
-        g_motors.write_all_motors(g_motor_throttle_base);
+        float motor1_speed = g_motor_throttle_base + roll_output - pitch_output + yaw_output; // front left
+        float motor2_speed = g_motor_throttle_base - roll_output - pitch_output - yaw_output + 60.0f; // front
+        float motor3_speed = g_motor_throttle_base - roll_output + pitch_output + yaw_output + 120.0f; // rear
+        float motor4_speed = g_motor_throttle_base + roll_output + pitch_output - yaw_output + 10.0f; // rear right
+
+        g_motors.write_motors(
+            motor1_speed,
+            motor2_speed,
+            motor3_speed,
+            motor4_speed
+        );
     }
     else
     {
