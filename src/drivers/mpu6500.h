@@ -109,6 +109,11 @@ class MPU6500
         void set_gyro_lpf(float alpha);
         void set_accel_lpf(float alpha);
 
+        /*
+         * Reset LPF state. The next update() seeds filtered data directly
+         * from the current scaled sample, avoiding a ramp from zero or from
+         * stale pre-calibration/pre-rotation values.
+         */
         void reset_filters();
 
         const raw_data_t & get_raw() const;
