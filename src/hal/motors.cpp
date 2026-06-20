@@ -15,10 +15,10 @@ uint32_t Motors::throttle_to_pwm (float throttle)
 
 void Motors::write_motors (float motor_1_throttle, float motor_2_throttle, float motor_3_throttle, float motor_4_throttle)
 {
-    ledcWrite(motor_channel_1, throttle_to_pwm(motor_1_throttle));
-    ledcWrite(motor_channel_2, throttle_to_pwm(motor_2_throttle));
-    ledcWrite(motor_channel_3, throttle_to_pwm(motor_3_throttle));
-    ledcWrite(motor_channel_4, throttle_to_pwm(motor_4_throttle));
+    ledcWrite(motor_1_pin, throttle_to_pwm(motor_1_throttle));
+    ledcWrite(motor_2_pin, throttle_to_pwm(motor_2_throttle));
+    ledcWrite(motor_3_pin, throttle_to_pwm(motor_3_throttle));
+    ledcWrite(motor_4_pin, throttle_to_pwm(motor_4_throttle));
 }
 
 void Motors :: write_all_motors (float throttle)
@@ -28,15 +28,10 @@ void Motors :: write_all_motors (float throttle)
 
 void Motors::setup_motors ()
 {
-    ledcSetup(motor_channel_1, motor_freq_hz, motor_resolution_bits);
-    ledcSetup(motor_channel_2, motor_freq_hz, motor_resolution_bits);
-    ledcSetup(motor_channel_3, motor_freq_hz, motor_resolution_bits);
-    ledcSetup(motor_channel_4, motor_freq_hz, motor_resolution_bits);
-
-    ledcAttachPin(motor_1_pin, motor_channel_1);
-    ledcAttachPin(motor_2_pin, motor_channel_2);
-    ledcAttachPin(motor_3_pin, motor_channel_3);
-    ledcAttachPin(motor_4_pin, motor_channel_4);
+    ledcAttach(motor_1_pin, motor_freq_hz, motor_resolution_bits);
+    ledcAttach(motor_2_pin, motor_freq_hz, motor_resolution_bits);
+    ledcAttach(motor_3_pin, motor_freq_hz, motor_resolution_bits);
+    ledcAttach(motor_4_pin, motor_freq_hz, motor_resolution_bits);
 
     write_all_motors(motor_speed_min_us);
 }
