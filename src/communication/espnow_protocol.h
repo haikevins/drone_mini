@@ -5,6 +5,12 @@
 
 typedef struct
 {
+    uint32_t counter;
+}
+heartbeat_data_packet_t;
+
+typedef struct
+{
     float roll;
     float pitch;
     float yaw;
